@@ -15,22 +15,26 @@ public class WarehouseController : ControllerBase
     {
         _configuration = configuration;
     }
+    //api/warehouse/procedura
     [HttpPost("procedura")]
     public async Task<IActionResult> AddProductUsingProcedure([FromBody] WarehouseRequest request)
     {
+        //polaczenie
         await using var connection = new SqlConnection(_configuration.GetConnectionString("Default"));
+        //komenda do wykonania
         await using var command = new SqlCommand("AddProductToWarehouse", connection)
         {
             CommandType = CommandType.StoredProcedure
         };
-
+        //pobiera body
         command.Parameters.AddWithValue("@IdProduct", request.IdProduct);
         command.Parameters.AddWithValue("@IdWarehouse", request.IdWarehouse);
         command.Parameters.AddWithValue("@Amount", request.Amount);
         command.Parameters.AddWithValue("@CreatedAt", request.CreatedAt);
-
+        
         try
         {
+            //wykokuje dzialanie
             await connection.OpenAsync();
             var result = await command.ExecuteScalarAsync();
             return Ok(result);
@@ -40,6 +44,7 @@ public class WarehouseController : ControllerBase
             return StatusCode(500, ex.Message);
         }
     }
+    //api/warehouse/normal
     [HttpPost("normal")]
     public async Task<IActionResult> AddProductToWarehouse([FromBody] WarehouseRequest request)
     {
@@ -50,7 +55,7 @@ public class WarehouseController : ControllerBase
         await connection.OpenAsync();
 
         var transaction = await connection.BeginTransactionAsync();
-
+        //sprawdza produkty
         try
         {
             var command = new SqlCommand { Connection = connection, Transaction = (SqlTransaction)transaction };
@@ -66,14 +71,14 @@ public class WarehouseController : ControllerBase
             var warehouseExists = (int)await command.ExecuteScalarAsync() > 0;
             if (!warehouseExists) return NotFound("Warehouse not found.");
             command.Parameters.Clear();
-
+            //sprawdza warehouse
             command.CommandText = @"SELECT TOP 1 IdOrder, Price FROM ""Order"" o 
                 JOIN Product p ON o.IdProduct = p.IdProduct
                 WHERE o.IdProduct = @IdProduct AND o.Amount = @Amount AND o.CreatedAt < @CreatedAt AND o.FulfilledAt IS NULL";
             command.Parameters.AddWithValue("@IdProduct", request.IdProduct);
             command.Parameters.AddWithValue("@Amount", request.Amount);
             command.Parameters.AddWithValue("@CreatedAt", request.CreatedAt);
-
+            //sprawdza czy sa podane wartosci i czy sa poprawne
             int? orderId = null;
             decimal? price = null;
             await using (var reader = await command.ExecuteReaderAsync())
@@ -89,19 +94,19 @@ public class WarehouseController : ControllerBase
             
             if (orderId == null) return NotFound("No matching order found.");
             command.Parameters.Clear();
-
+            //sprawdza czy jest co najmniej 1 produkt
             command.CommandText = "SELECT COUNT(1) FROM Product_Warehouse WHERE IdOrder = @IdOrder";
            
             command.Parameters.AddWithValue("@IdOrder", orderId);
             var alreadyFulfilled = (int)await command.ExecuteScalarAsync() > 0;
             if (alreadyFulfilled) return Conflict("Order already fulfilled.");
             command.Parameters.Clear();
-
+            //updatuje tenze produkt ze jest wypenmione
             command.CommandText = "UPDATE \"Order\" SET FulfilledAt = GETDATE() WHERE IdOrder = @IdOrder";
             command.Parameters.AddWithValue("@IdOrder", orderId);
             await command.ExecuteNonQueryAsync();
             command.Parameters.Clear();
-
+            //wklada ten produkt do warehouse
             command.CommandText = @"
                 INSERT INTO Product_Warehouse (IdWarehouse, IdProduct, IdOrder, Amount, Price, CreatedAt)
                 OUTPUT INSERTED.IdProductWarehouse

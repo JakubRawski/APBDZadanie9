@@ -1,7 +1,7 @@
 ﻿using System.ComponentModel.DataAnnotations;
 
 namespace Tutorial9.Model;
-
+//
 public class Animal
 {
     public int IdAnimal { get; set; }
